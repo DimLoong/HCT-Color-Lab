@@ -1,4 +1,4 @@
-[中文](#中文) · [English](#english)
+[中文](#中文) · [English](#english) · [在线查看 Online View](https://dimloong.github.io/HCT-Color-Lab/)
 
 # HCT Color Lab
 
