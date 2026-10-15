@@ -1047,7 +1047,7 @@ input[type="color"]::-webkit-color-swatch {
 
 .palette {
     display: grid;
-    grid-template-columns: repeat(10, 1fr);
+    grid-template-columns: repeat(var(--palette-columns, 10), minmax(0, 1fr));
     align-items: stretch;
     overflow: hidden;
     border-radius: 18px;
@@ -1056,13 +1056,45 @@ input[type="color"]::-webkit-color-swatch {
 }
 
 .palette.is-series {
-    grid-template-columns: repeat(var(--series-columns, 16), 1fr);
+    grid-template-columns: repeat(var(--series-columns, 16), minmax(0, 1fr));
 }
 
 .swatch-column {
     min-width: 0;
     display: flex;
     flex-direction: column;
+    container-type: inline-size;
+}
+
+@container (max-width: 72px) {
+    .swatch {
+        padding-right: 4px;
+        padding-left: 4px;
+    }
+    .swatch-copy {
+        right: 50%;
+        transform: translateX(50%);
+    }
+    .swatch-info {
+        justify-items: center;
+    }
+    .swatch-hex {
+        opacity: 0;
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        transition: opacity 140ms ease;
+    }
+    .swatch:hover .swatch-hex,
+    .swatch:focus-visible .swatch-hex {
+        opacity: 1;
+    }
+    .anchor-badge {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--accent);
+        font-size: 0;
+    }
 }
 
 .swatch-label {

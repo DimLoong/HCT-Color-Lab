@@ -1997,7 +1997,8 @@ function App() {
                             "--series-columns": Math.min(
                                 swatches.length || 1,
                                 16
-                            )
+                            ),
+                            "--palette-columns": swatches.length || 1
                         }}
                         aria-live="polite"
                     >
