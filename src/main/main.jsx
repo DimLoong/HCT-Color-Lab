@@ -663,10 +663,128 @@ function Swatch({ swatch, isSeries, hideValues, onCopy, language }) {
     );
 }
 
+const AUTO_PICK_LIMIT = 20;
+
+function extractPaletteColors(sourceCanvas) {
+    const maxSide = 320;
+    const scale = Math.min(
+        1,
+        maxSide / Math.max(sourceCanvas.width, sourceCanvas.height)
+    );
+    const w = Math.max(1, Math.round(sourceCanvas.width * scale));
+    const h = Math.max(1, Math.round(sourceCanvas.height * scale));
+    const work = document.createElement("canvas");
+    work.width = w;
+    work.height = h;
+    const ctx = work.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(sourceCanvas, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h).data;
+    const visited = new Uint8Array(w * h);
+    const stack = new Int32Array(w * h);
+    const tolerance = 12;
+    const minSide = Math.max(3, Math.round(Math.min(w, h) * 0.02));
+    const minArea = Math.max(16, w * h * 0.0008);
+    const regions = [];
+
+    for (let start = 0; start < w * h; start++) {
+        if (visited[start]) continue;
+        const so = start * 4;
+        const sr = data[so];
+        const sg = data[so + 1];
+        const sb = data[so + 2];
+        let top = 0;
+        stack[top++] = start;
+        visited[start] = 1;
+        let area = 0;
+        let rSum = 0;
+        let gSum = 0;
+        let bSum = 0;
+        let minX = w;
+        let minY = h;
+        let maxX = 0;
+        let maxY = 0;
+        while (top) {
+            const index = stack[--top];
+            const o = index * 4;
+            const x = index % w;
+            const y = (index - x) / w;
+            area++;
+            rSum += data[o];
+            gSum += data[o + 1];
+            bSum += data[o + 2];
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            const neighbors = [
+                x > 0 ? index - 1 : -1,
+                x < w - 1 ? index + 1 : -1,
+                y > 0 ? index - w : -1,
+                y < h - 1 ? index + w : -1
+            ];
+            for (const next of neighbors) {
+                if (next < 0 || visited[next]) continue;
+                const no = next * 4;
+                if (
+                    data[no + 3] > 200 &&
+                    Math.abs(data[no] - sr) <= tolerance &&
+                    Math.abs(data[no + 1] - sg) <= tolerance &&
+                    Math.abs(data[no + 2] - sb) <= tolerance
+                ) {
+                    visited[next] = 1;
+                    stack[top++] = next;
+                }
+            }
+        }
+        const bw = maxX - minX + 1;
+        const bh = maxY - minY + 1;
+        if (
+            data[so + 3] <= 200 ||
+            area < minArea ||
+            bw < minSide ||
+            bh < minSide ||
+            area / (bw * bh) < 0.5 ||
+            area > w * h * 0.5
+        )
+            continue;
+        const rgb = {
+            r: Math.round(rSum / area),
+            g: Math.round(gSum / area),
+            b: Math.round(bSum / area)
+        };
+        if (Math.min(rgb.r, rgb.g, rgb.b) >= 235) continue;
+        regions.push({ rgb, minX, minY, bh, cx: (minX + maxX) / 2, cy: (minY + maxY) / 2 });
+    }
+
+    regions.sort((a, b) => a.minY - b.minY || a.minX - b.minX);
+    const rows = [];
+    for (const region of regions) {
+        const row = rows.find(
+            (item) => Math.abs(item.cy - region.cy) <= item.bh / 2
+        );
+        if (row) row.items.push(region);
+        else rows.push({ cy: region.cy, bh: region.bh, items: [region] });
+    }
+    const colors = [];
+    for (const row of rows.sort((a, b) => a.cy - b.cy)) {
+        for (const { rgb } of row.items.sort((a, b) => a.cx - b.cx)) {
+            const duplicate = colors.some(
+                (color) =>
+                    Math.abs(color.r - rgb.r) <= 6 &&
+                    Math.abs(color.g - rgb.g) <= 6 &&
+                    Math.abs(color.b - rgb.b) <= 6
+            );
+            if (!duplicate) colors.push(rgb);
+        }
+    }
+    return colors;
+}
+
 function ImageColorPicker({
     language,
     history,
     onPick,
+    onAutoPick,
     onCopyHistory,
     onClearHistory
 }) {
@@ -675,7 +793,33 @@ function ImageColorPicker({
     const [imageName, setImageName] = useState("");
     const [isReady, setIsReady] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
+    const [paletteMode, setPaletteMode] = useState(true);
+    const paletteModeRef = useRef(paletteMode);
+    paletteModeRef.current = paletteMode;
+    const [autoStatus, setAutoStatus] = useState("");
     const isZh = language === "zh";
+
+    function runAutoPick() {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const colors = extractPaletteColors(canvas);
+        if (!colors.length) {
+            setAutoStatus(isZh ? "未识别到色块" : "No swatches detected");
+        } else if (colors.length > AUTO_PICK_LIMIT) {
+            setAutoStatus(
+                isZh
+                    ? `识别到 ${colors.length} 个颜色，超过 ${AUTO_PICK_LIMIT} 个，请手动取色`
+                    : `${colors.length} colors found (over ${AUTO_PICK_LIMIT}), pick manually`
+            );
+        } else {
+            onAutoPick(colors);
+            setAutoStatus(
+                isZh
+                    ? `已自动提取 ${colors.length} 个颜色`
+                    : `Auto-picked ${colors.length} colors`
+            );
+        }
+    }
 
     function loadFile(file) {
         if (!file?.type.startsWith("image/")) return;
@@ -706,6 +850,8 @@ function ImageColorPicker({
             context.drawImage(image, 0, 0, canvas.width, canvas.height);
             URL.revokeObjectURL(objectUrl);
             setIsReady(true);
+            setAutoStatus("");
+            if (paletteModeRef.current) runAutoPick();
         };
         image.onerror = () => URL.revokeObjectURL(objectUrl);
         image.src = objectUrl;
@@ -810,11 +956,24 @@ function ImageColorPicker({
                           : "Choose image"}
                 </button>
                 <span className="local-file-name">
-                    {imageName ||
+                    {autoStatus ||
+                        imageName ||
                         (isZh
                             ? "支持 JPG、PNG、WebP 等格式"
                             : "JPG, PNG, WebP and more")}
                 </span>
+                <label className="palette-mode-toggle">
+                    <input
+                        type="checkbox"
+                        checked={paletteMode}
+                        onChange={(event) => {
+                            setPaletteMode(event.target.checked);
+                            if (event.target.checked && isReady) runAutoPick();
+                            else if (!event.target.checked) setAutoStatus("");
+                        }}
+                    />
+                    {isZh ? "色板截图取色" : "Palette screenshot"}
+                </label>
             </div>
             <div className="picker-history-heading">
                 <div>
@@ -1050,6 +1209,17 @@ function App() {
                 [hex, ...current.filter((color) => color !== hex)].slice(0, 50)
             );
         }
+    }
+
+    function pickImageColors(colors) {
+        setRgb(colors[0]);
+        const hexes = colors.map(rgbToHex);
+        setColorHistory((current) =>
+            [
+                ...hexes,
+                ...current.filter((color) => !hexes.includes(color))
+            ].slice(0, 50)
+        );
     }
 
     function setHex(value) {
@@ -1497,6 +1667,7 @@ function App() {
                                     language={language}
                                     history={colorHistory}
                                     onPick={pickImageColor}
+                                    onAutoPick={pickImageColors}
                                     onCopyHistory={() =>
                                         copyText(
                                             colorHistory.join(","),

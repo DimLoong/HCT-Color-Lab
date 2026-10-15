@@ -757,6 +757,23 @@ input[type="color"]::-webkit-color-swatch {
     stroke-width: 1.7;
 }
 
+.palette-mode-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.palette-mode-toggle input {
+    margin: 0;
+    accent-color: currentColor;
+}
+
 .local-file-name {
     min-width: 0;
     overflow: hidden;
