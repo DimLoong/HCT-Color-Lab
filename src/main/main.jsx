@@ -15,7 +15,6 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 
 const TONES = [96, 90, 81, 71, 60, 50, 40, 30, 20, 12];
-const TOKEN_STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900];
 const ADAPTIVE_TONE_PROFILES = {
     10: TONES,
     11: [96, 92, 88, 80, 70, 60, 50, 40, 30, 20, 8],
@@ -124,7 +123,7 @@ function buildToneSwatches(hct, targetChroma) {
         const colorRgb = argbToRgb(realized.toInt());
         const grayRgb = argbToRgb(Hct.from(0, 0, targetTone).toInt());
         return {
-            label: String(TOKEN_STEPS[index]),
+            label: String(index + 1),
             tone: targetTone,
             actualTone: realized.tone,
             rgb: colorRgb,
@@ -136,9 +135,12 @@ function buildToneSwatches(hct, targetChroma) {
     });
 }
 
-function buildAnchoredTonePalette(hexes) {
+function buildAnchoredTonePalette(hexes, count = TONES.length) {
+    const tones = resampleToneProfile(TONES, count).map(
+        (value) => Math.round(value * 10) / 10
+    );
     const anchors = hexes
-        .slice(0, TONES.length)
+        .slice(0, tones.length)
         .map((source) => {
             const rgb = hexToRgb(source);
             return {
@@ -160,12 +162,12 @@ function buildAnchoredTonePalette(hexes) {
         let best = { cost: Infinity, indices: [] };
         for (
             let toneIndex = minimumToneIndex;
-            toneIndex <= TONES.length - remaining;
+            toneIndex <= tones.length - remaining;
             toneIndex += 1
         ) {
             const next = assign(anchorIndex + 1, toneIndex + 1);
             const cost =
-                Math.abs(anchors[anchorIndex].hct.tone - TONES[toneIndex]) +
+                Math.abs(anchors[anchorIndex].hct.tone - tones[toneIndex]) +
                 next.cost;
             if (cost < best.cost)
                 best = { cost, indices: [toneIndex, ...next.indices] };
@@ -178,7 +180,7 @@ function buildAnchoredTonePalette(hexes) {
     const placedAnchors = anchors.map((anchor, index) => ({
         ...anchor,
         toneIndex: assignment[index],
-        targetTone: TONES[assignment[index]]
+        targetTone: tones[assignment[index]]
     }));
     const anchorAt = new Map(
         placedAnchors.map((anchor) => [anchor.toneIndex, anchor])
@@ -188,7 +190,7 @@ function buildAnchoredTonePalette(hexes) {
         return (start + delta * progress + 360) % 360;
     };
 
-    const swatches = TONES.map((targetTone, toneIndex) => {
+    const swatches = tones.map((targetTone, toneIndex) => {
         const exactAnchor = anchorAt.get(toneIndex);
         let hue;
         let chroma;
@@ -231,7 +233,7 @@ function buildAnchoredTonePalette(hexes) {
             : argbToRgb(realized.toInt());
         const grayRgb = argbToRgb(Hct.from(0, 0, targetTone).toInt());
         return {
-            label: String(TOKEN_STEPS[toneIndex]),
+            label: String(toneIndex + 1),
             tone: targetTone,
             actualTone: realized.tone,
             rgb: colorRgb,
@@ -257,8 +259,8 @@ function CopyIcon({ className }) {
     );
 }
 
-function RangeField({ label, english, suffix, value, max, onChange }) {
-    const progress = `${(value / max) * 100}%`;
+function RangeField({ label, english, suffix, value, min = 0, max, onChange }) {
+    const progress = `${((value - min) / (max - min)) * 100}%`;
     return (
         <label className="range-field">
             <span className="field-label">
@@ -268,23 +270,23 @@ function RangeField({ label, english, suffix, value, max, onChange }) {
             <span className="range-row">
                 <input
                     type="range"
-                    min="0"
+                    min={min}
                     max={max}
                     step="1"
                     value={value}
                     style={{ "--range-progress": progress }}
                     onChange={(event) =>
-                        onChange(clamp(event.target.value, 0, max))
+                        onChange(clamp(event.target.value, min, max))
                     }
                 />
                 <span className="number-shell">
                     <input
                         type="number"
-                        min="0"
+                        min={min}
                         max={max}
                         value={value}
                         onChange={(event) =>
-                            onChange(clamp(event.target.value, 0, max))
+                            onChange(clamp(event.target.value, min, max))
                         }
                     />
                     <i>{suffix}</i>
@@ -1032,6 +1034,7 @@ function App() {
     const [rgbSeriesInput, setRgbSeriesInput] = useState("#4F64E9");
     const [seriesInput, setSeriesInput] = useState(INITIAL_SERIES);
     const [colorHistory, setColorHistory] = useState([]);
+    const [stepCount, setStepCount] = useState(10);
     const [hideValues, setHideValues] = useState(false);
     const [lightnessCheck, setLightnessCheck] = useState(false);
     const [showAnalysis, setShowAnalysis] = useState(true);
@@ -1071,8 +1074,8 @@ function App() {
         [mode, rgb, baseHct]
     );
     const anchoredPalette = useMemo(
-        () => buildAnchoredTonePalette(parsedRgbSeries.colors),
-        [parsedRgbSeries]
+        () => buildAnchoredTonePalette(parsedRgbSeries.colors, stepCount),
+        [parsedRgbSeries, stepCount]
     );
 
     const swatches = useMemo(() => {
@@ -1134,8 +1137,8 @@ function App() {
             "HCT",
             tr("HEX 锚点来源", "HEX anchor source"),
             tr(
-                "将指定 HEX 匹配到最近的目标 T 档位，并在锚点之间补齐一套 10 阶色彩系列。",
-                "Snap HEX anchors to the nearest target tones and fill one 10-step series between them."
+                `将指定 HEX 匹配到最近的目标 T 档位，并在锚点之间补齐一套 ${stepCount} 阶色彩系列。`,
+                `Snap HEX anchors to the nearest target tones and fill one ${stepCount}-step series between them.`
             )
         ],
         series: [
@@ -1614,6 +1617,15 @@ function App() {
                                             )}
                                         </span>
                                     </div>
+                                    <RangeField
+                                        label={tr("颜色数量", "Steps")}
+                                        english="Steps"
+                                        suffix="#"
+                                        value={stepCount}
+                                        min={3}
+                                        max={30}
+                                        onChange={setStepCount}
+                                    />
                                 </div>
                             )}
 
